@@ -16,6 +16,67 @@ This bot watches a GitHub repository for open issues related to Stripe integrati
 
 ---
 
+## Running the Bot
+
+Set your environment variables and run:
+
+**Linux / macOS**
+```bash
+export GITHUB_TOKEN="ghp_your_token_here"
+export GITHUB_OWNER="your-org-or-username"
+export GITHUB_REPO="your-repo-name"
+go run .
+```
+
+**Windows (PowerShell)**
+```powershell
+$env:GITHUB_TOKEN="ghp_your_token_here"
+$env:GITHUB_OWNER="your-org-or-username"
+$env:GITHUB_REPO="your-repo-name"
+go run .
+```
+
+### Sample output
+
+```
+2026/04/19 12:00:01 Starting triage bot for myorg/myrepo
+2026/04/19 12:00:02 Found 8 open issues
+2026/04/19 12:00:02 Processing issue #42: Stripe payment failing with 401
+2026/04/19 12:00:03 Issue #42 classified as: error
+2026/04/19 12:00:04 ✅ Commented on issue #42
+2026/04/19 12:00:06 Processing issue #43: How do I set up Stripe webhooks?
+2026/04/19 12:00:07 Issue #43 classified as: webhook
+2026/04/19 12:00:08 ✅ Commented on issue #43
+2026/04/19 12:00:08 Done. Commented on 2 issues. Log saved to issues_log.csv
+```
+
+---
+
+## How It Works
+
+### Step 1 — Fetch Issues
+`main.go` calls `FetchIssues()` which uses `swytchcode exec repos.issue.get` to pull open GitHub issues from the target repo.
+
+### Step 2 — Classify
+`classifier.go` sends each issue title + body to `swytchcode_discover` with a classification prompt. It categorises issues into:
+
+| Type | Trigger keywords |
+|------|-----------------|
+| `setup` | how, install, configure, getting started |
+| `error` | error, fail, 401, 500, crash, bug, broken |
+| `webhook` | webhook, event, listener, endpoint |
+| `unknown` | anything else — skipped |
+
+If the MCP call fails, it falls back to local keyword matching — the bot never crashes.
+
+### Step 3 — Comment
+`commenter.go` calls `swytchcode exec repos.issue.comments.create` to post the matching template. Max **5 comments per run**, with a **2-second delay** between posts.
+
+### Step 4 — Log
+Every action is appended to `issues_log.csv` with issue URL, title, type, comment body, and timestamp — for manual team review.
+
+---
+
 ## Architecture
 
 ```
@@ -37,43 +98,15 @@ issues_log.csv  (audit trail)
 
 ---
 
-## Project Structure
+## Tech Stack
 
-```
-openclaw-swytchcode-demo/
-├── main.go          # Entry point — orchestrates fetch → classify → comment → log
-├── classifier.go    # Issue classifier (swytchcode MCP primary, keyword fallback)
-├── commenter.go     # GitHub commenter via swytchcode exec
-├── templates.go     # Comment templates (setup / error / webhook)
-├── logger.go        # CSV logger for audit trail
-├── go.mod           # Go module (stdlib only, no external deps)
-└── .gitignore
-```
-
----
-
-## How It Works
-
-### Step 1 — Fetch Issues
-`main.go` calls `FetchIssues()` which uses `swytchcode exec repos.issue.get` to pull open GitHub issues from the target repo.
-
-### Step 2 — Classify
-`classifier.go` sends each issue title + body to `swytchcode_discover` (the Swytchcode MCP semantic search tool) with a classification prompt. It categorises issues into:
-
-| Type | Trigger keywords |
-|------|-----------------|
-| `setup` | how, install, configure, getting started |
-| `error` | error, fail, 401, 500, crash, bug, broken |
-| `webhook` | webhook, event, listener, endpoint |
-| `unknown` | anything else — skipped |
-
-If the MCP call fails, it falls back to local keyword matching — the bot never crashes.
-
-### Step 3 — Comment
-`commenter.go` calls `swytchcode exec repos.issue.comments.create` to post the matching template. Max **5 comments per run** (configurable), with a **2-second delay** between posts to avoid GitHub rate limiting.
-
-### Step 4 — Log
-Every action is appended to `issues_log.csv` with issue URL, title, type, comment body, and timestamp — for manual team review.
+| Layer | Technology |
+|-------|-----------|
+| AI Agent | [OpenClaw](https://openclaw.ai) |
+| Execution Kernel | [Swytchcode CLI](https://cli.swytchcode.com) v2.2.7 |
+| GitHub Integration | `github.github@1.1.4` (via Swytchcode registry) |
+| Language | Go 1.21+ (stdlib only — zero external dependencies) |
+| Logging | CSV via `encoding/csv` |
 
 ---
 
@@ -129,42 +162,6 @@ swytchcode list methods
 
 ---
 
-## Running the Bot
-
-Set environment variables and run:
-
-**Linux / macOS**
-```bash
-export GITHUB_TOKEN="ghp_your_token_here"
-export GITHUB_OWNER="your-org-or-username"
-export GITHUB_REPO="your-repo-name"
-go run .
-```
-
-**Windows (PowerShell)**
-```powershell
-$env:GITHUB_TOKEN="ghp_your_token_here"
-$env:GITHUB_OWNER="your-org-or-username"
-$env:GITHUB_REPO="your-repo-name"
-go run .
-```
-
-### Sample output
-
-```
-2026/04/19 12:00:01 Starting triage bot for myorg/myrepo
-2026/04/19 12:00:02 Found 8 open issues
-2026/04/19 12:00:02 Processing issue #42: Stripe payment failing with 401
-2026/04/19 12:00:03 Issue #42 classified as: error
-2026/04/19 12:00:04 ✅ Commented on issue #42
-2026/04/19 12:00:06 Processing issue #43: How do I set up Stripe webhooks?
-2026/04/19 12:00:07 Issue #43 classified as: webhook
-2026/04/19 12:00:08 ✅ Commented on issue #43
-2026/04/19 12:00:08 Done. Commented on 2 issues. Log saved to issues_log.csv
-```
-
----
-
 ## Configuration
 
 | Environment Variable | Required | Description |
@@ -214,18 +211,6 @@ The bot uses three hardcoded templates in `templates.go`:
 
 ---
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| AI Agent | [OpenClaw](https://openclaw.ai) |
-| Execution Kernel | [Swytchcode CLI](https://cli.swytchcode.com) v2.2.7 |
-| GitHub Integration | `github.github@1.1.4` (via Swytchcode registry) |
-| Language | Go 1.21+ (stdlib only — zero external dependencies) |
-| Logging | CSV via `encoding/csv` |
-
----
-
 ## Why Swytchcode?
 
 Without Swytchcode, an AI agent calling the GitHub API directly would:
@@ -240,12 +225,7 @@ With Swytchcode, the agent only decides *what* to call — the kernel handles *h
 
 ## Contributing
 
-This is a demo repo. If you want to extend it:
-
-1. Fork it
-2. Add new issue types in `classifier.go` and new templates in `templates.go`
-3. Use `swytchcode search` to find additional GitHub tools to integrate
-4. Open a PR
+See [CONTRIBUTING.md](./CONTRIBUTING.md)
 
 ---
 
